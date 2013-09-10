@@ -1069,18 +1069,21 @@ describe("WebPage object", function() {
 
     it('should open url using secure connection', function() {
         var page = require('webpage').create();
-        var url = 'https://en.wikipedia.org';
+        var url = 'https://www.google.com/m';
 
-        var handled = false;
+        var loaded = false, handled = false;
 
         runs(function() {
             page.open(url, function(status) {
+                loaded = true;
                 expect(status == 'success').toEqual(true);
                 handled = true;
             });
         });
 
-        waits(3000);
+        waitsFor(function () {
+            return loaded;
+        }, 'Can not load ' + url, 3000);
 
         runs(function() {
             expect(handled).toEqual(true);
@@ -1122,7 +1125,43 @@ describe("WebPage object", function() {
 
         runs(function() {
             expect(handled).toEqual(true);
+            page.close();
             server.close();
+        });
+    });
+
+
+    it("should change a url request with an encoded query string", function() {
+        var page = new require('webpage').create();
+
+        var server = require('webserver').create();
+        server.listen(12345, function(request, response) {
+            // echo received request headers in response body
+            response.write(JSON.stringify(request.headers));
+            response.close();
+        });
+
+        var url = "http://localhost:12345/cdn-cgi/pe/bag?r%5B%5D=http%3A%2F%2Fwww.example.org%2Fcdn-cgi%2Fnexp%2Fabv%3D927102467%2Fapps%2Fabetterbrowser.js";
+
+        var handled = false;
+        runs(function() {
+            expect(handled).toEqual(false);
+
+            page.onResourceRequested = function(requestData, request) {
+                request.changeUrl(requestData.url);
+            };
+
+           page.onResourceReceived = function(data) {
+                if (data['stage'] === 'end') {
+                    expect(data.url).toEqual(url);
+                }
+           };
+
+           page.open(url, function (status) {
+                expect(status == 'success').toEqual(true);
+                handled = true;
+                server.close();
+            });
         });
     });
 
@@ -1147,6 +1186,13 @@ describe("WebPage object", function() {
             page.open(url, function(status) {
                 expect(status).toEqual('success');
             });
+        });
+        
+        waits(5000);
+        
+        runs(function() {
+            page.close();
+            expect(handled).toBeTruthy();
         });
     });
 
@@ -1205,6 +1251,36 @@ describe("WebPage object", function() {
 
         runs(function() {
             expect(handled).toBe(true);
+        });
+    });
+    
+    it('should fire `onResourceReceived` callback when the resource error occured', function() {
+        var page = require('webpage').create();
+        var server = require('webserver').create();
+        var service = server.listen(12345, function (request, response) {
+            var code = parseInt(/^\/(\d+)$/.exec(request.url)[1], 10);
+            response.statusCode = code;
+            response.write("how");
+            response.close();
+        });
+        var handled = 0;
+
+        runs(function() {
+            page.onResourceReceived = function(res) {
+                handled++;
+            };
+
+            page.open('http://localhost:12345/400', function() {
+                server.close();
+            });
+        });
+
+        waits(5000);
+
+        runs(function() {
+            expect(handled).toEqual(2);
+            page.close();
+            server.close();
         });
     });
 });
@@ -1330,31 +1406,6 @@ describe("WebPage construction with options", function () {
         };
         checkViewportSize(new WebPage(opts), opts.viewportSize);
     });
-
-    var texts = [
-        { codec: 'Shift_JIS', base64: 'g3SDQIOTg2eDgA==', reference: 'ファントム'},
-        { codec: 'EUC-JP', base64: 'pdWloaXzpcil4A0K', reference: 'ファントム'},
-        { codec: 'ISO-2022-JP', base64: 'GyRCJVUlISVzJUglYBsoQg0K', reference: 'ファントム'},
-        { codec: 'Big5', base64: 'pNu2SA0K', reference: '幻象'},
-        { codec: 'GBK', base64: 'u8PP8w0K', reference: '幻象'}
-    ];
-    for (var i = 0; i < texts.length; ++i) {
-        describe("Text codec support", function() {
-            var text = texts[i];
-            var dataUrl = 'data:text/plain;charset=' + text.codec + ';base64,' + text.base64;
-            var page = new WebPage();
-            var decodedText;
-            page.open(dataUrl, function(status) {
-                decodedText = page.evaluate(function() {
-                    return document.getElementsByTagName('pre')[0].innerText;
-                });
-                page.close();
-            });
-            it("Should support text codec " + text.codec, function() {
-                expect(decodedText.match("^" + text.reference) == text.reference).toEqual(true);
-            });
-        });
-    }
 });
 
 describe("WebPage switch frame of execution (deprecated API)", function(){
@@ -1854,6 +1905,69 @@ describe('WebPage navigation events', function() {
     });
 });
 
+describe("WebPage loading/loadingProgress properties", function() {
+    var p = require("webpage").create();
+
+    it("should not be loading when page has just been created", function() {
+        expect(p.loading).toBeFalsy();
+        expect(p.loadingProgress).toEqual(0);
+    });
+
+    it("should be loading when 'page.open' is invoked", function() {
+        var s = require("webserver").create();
+
+        s.listen(12345, function(request, response) {
+            setTimeout(function() {
+                response.statusCode = 200;
+                response.write('<html><body>Loaded!</body></html>');
+                response.close();
+            }, 200);
+        });
+
+        runs(function() {
+            p.open("http://localhost:12345");
+            expect(p.loading).toBeTruthy();
+            expect(p.loadingProgress).toBeGreaterThan(0);
+        });
+
+        waits(500);
+
+        runs(function() {
+            s.close();
+        });
+    });
+
+    it("should be completed when page is fully loaded", function() {
+        var s = require("webserver").create();
+
+        s.listen(12345, function(request, response) {
+            setTimeout(function() {
+                response.statusCode = 200;
+                response.write('<html><body>Loaded!</body></html>');
+                response.close();
+            }, 500);
+        });
+
+        var loaded = false;
+
+        runs(function() {
+            p.open("http://localhost:12345", function () {
+                loaded = true;
+            });
+        });
+
+        waitsFor(function () {
+            return loaded;
+        }, 'Can not test loading progress' , 3000);
+
+        runs(function() {
+            expect(p.loading).toBeFalsy();
+            expect(p.loadingProgress).toEqual(100);
+            s.close();
+        });
+    });
+});
+
 describe("WebPage render image", function(){
     var TEST_FILE_DIR = "webpage-spec-renders/";
 
@@ -1861,9 +1975,6 @@ describe("WebPage render image", function(){
     p.paperSize = { width: '300px', height: '300px', border: '0px' };
     p.clipRect = { top: 0, left: 0, width: 300, height: 300};
     p.viewportSize = { width: 300, height: 300};
-
-    p.open( TEST_FILE_DIR + "index.html");
-    waits(50);
 
     function render_test( format, option ){
          var opt = option || {};
@@ -1896,77 +2007,67 @@ describe("WebPage render image", function(){
         } catch (e) { console.log(e) }
 
         // for PDF test
-        content = content.replace(/CreationDate \(D:\d+\)Z\)/,'');
-        expect_content = expect_content.replace(/CreationDate \(D:\d+\)Z\)/,'');
+        if (format === "pdf") {
+            content = content.replace(/CreationDate \(D:\d+\)Z\)/,'');
+            expect_content = expect_content.replace(/CreationDate \(D:\d+\)Z\)/,'');
+        }
 
-        expect(content).toEqual(expect_content);
+        // Files may not be exact, compare rought size (KB) only.
+        expect(content.length >> 10).toEqual(expect_content.length >> 10);
+
+        // Content comparison works for PNG and JPEG.
+        if (format === "png" || format === "jpg") {
+            expect(content).toEqual(expect_content);
+        }
     }
 
     it("should render PDF file", function(){
-        render_test("pdf");
+        p.open( TEST_FILE_DIR + "index.html", function () {
+            render_test("pdf");
+        });
     });
 
     it("should render PDF file with format option", function(){
-        render_test("pdf", { format: "pdf" });
+        p.open( TEST_FILE_DIR + "index.html", function () {
+            render_test("pdf", { format: "pdf" });
+        });
     });
 
     it("should render GIF file", function(){
-        render_test("gif");
+        p.open( TEST_FILE_DIR + "index.html", function () {
+            render_test("gif");
+        });
     });
 
     it("should render GIF file with format option", function(){
-        render_test("gif", { format: "gif" });
+        p.open( TEST_FILE_DIR + "index.html", function () {
+            render_test("gif", { format: "gif" });
+        });
     });
 
     it("should render PNG file", function(){
-        render_test("png");
+        p.open( TEST_FILE_DIR + "index.html", function () {
+            render_test("png");
+        });
     });
 
     it("should render PNG file with format option", function(){
-        render_test("png", { format: "png" });
+        p.open( TEST_FILE_DIR + "index.html", function () {
+            render_test("png", { format: "png" });
+        });
     });
 
     it("should render JPEG file with quality option", function(){
-        render_test("jpg", { quality: 50 });
+        p.open( TEST_FILE_DIR + "index.html", function () {
+            render_test("jpg", { quality: 50 });
+        });
     });
 
     it("should render JPEG file with format and quality option", function(){
-        render_test("jpg", { format: 'jpg', quality: 50 });
+        p.open( TEST_FILE_DIR + "index.html", function () {
+            render_test("jpg", { format: 'jpg', quality: 50 });
+        });
     });
 
 });
 
-describe("WebPage loading/loadingProgress properties", function() {
-    var p = require("webpage").create();
-
-    it("should not be loading when page has just been created", function() {
-        expect(p.loading).toBeFalsy();
-        expect(p.loadingProgress).toEqual(0);
-    });
-
-    it("should be loading when 'page.open' is invoked", function() {
-        var s = require("webserver").create();
-
-        s.listen(12345, function(request, response) {
-            setTimeout(function() {
-                response.statusCode = 200;
-                response.write('<html><body>Loaded!</body></html>');
-                response.close();
-            }, 500);
-        });
-
-        p.onLoadFinished = function(status) {
-            expect(p.loading).toBeFalsy();
-            expect(p.loadingProgress).toEqual(0);
-        };
-        p.open("http://localhost:12345");
-        expect(p.loading).toBeTruthy();
-        expect(p.loadingProgress).toBeGreaterThan(0);
-
-        waits(500);
-
-        runs(function() {
-            s.close();
-        });
-    });
-});

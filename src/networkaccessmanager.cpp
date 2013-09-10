@@ -89,10 +89,11 @@ void JsNetworkRequest::abort()
 }
 
 
-void JsNetworkRequest::changeUrl(const QString& url)
+void JsNetworkRequest::changeUrl(const QString& address)
 {
     if (m_networkRequest) {
-        m_networkRequest->setUrl(QUrl(url));
+        QUrl url = QUrl::fromEncoded(QByteArray(address.toAscii()));
+        m_networkRequest->setUrl(url);
     }
 }
 
@@ -387,17 +388,11 @@ void NetworkAccessManager::handleNetworkError()
              << "(" << reply->errorString() << ")"
              << "URL:" << reply->url().toString();
 
-    m_ids.remove(reply);
-
-    if (m_started.contains(reply))
-        m_started.remove(reply);
-
     QVariantMap data;
+    data["id"] = m_ids.value(reply);
     data["url"] = reply->url().toString();
     data["errorCode"] = reply->error();
     data["errorString"] = reply->errorString();
 
     emit resourceError(data);
-
-    reply->deleteLater();
 }
