@@ -2541,6 +2541,7 @@ void QPdfEnginePrivate::drawTextItem(const QPointF &p, const QTextItemInt &ti)
         return;
     int synthesized = ti.fontEngine->synthesized();
     qreal stretch = synthesized & QFontEngine::SynthesizedStretch ? ti.fontEngine->fontDef.stretch/100. : 1.;
+    qreal letterSpacing = ti.f->letterSpacingType() == QFont::AbsoluteSpacing ? ti.f->letterSpacing() : 0;
 
     *currentPage << "BT\n"
                  << "/F" << font->object_id << size << "Tf "
@@ -2579,6 +2580,7 @@ void QPdfEnginePrivate::drawTextItem(const QPointF &p, const QTextItemInt &ti)
         qreal y = positions[i].y.toReal();
         if (synthesized & QFontEngine::SynthesizedItalic)
             x += .3*y;
+        x += i*letterSpacing;
         x /= stretch;
         char buf[5];
         int g = font->addGlyph(glyphs[i]);
@@ -2599,6 +2601,7 @@ void QPdfEnginePrivate::drawTextItem(const QPointF &p, const QTextItemInt &ti)
             qreal y = positions[i].y.toReal();
             if (synthesized & QFontEngine::SynthesizedItalic)
                 x += .3*y;
+            x += i*letterSpacing;
             x /= stretch;
             char buf[5];
             int g = font->addGlyph(glyphs[i]);
